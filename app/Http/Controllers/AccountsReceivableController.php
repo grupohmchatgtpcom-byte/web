@@ -46,8 +46,18 @@ class AccountsReceivableController extends Controller
     {
         $bcv_rate = getActiveBcvRate();
 
+        $payments_subquery = DB::table('transaction_payments as tp')
+            ->select([
+                'tp.transaction_id',
+                DB::raw('SUM(IF(tp.is_return = 1, -1 * tp.amount, tp.amount)) as total_paid'),
+            ])
+            ->groupBy('tp.transaction_id');
+
         $query = DB::table('transactions as t')
             ->join('contacts as c', 't.contact_id', '=', 'c.id')
+            ->leftJoinSub($payments_subquery, 'tp_sum', function ($join) {
+                $join->on('tp_sum.transaction_id', '=', 't.id');
+            })
             ->where('t.business_id', $business_id)
             ->where('t.type', 'sell')
             ->where('t.status', 'final')
@@ -57,11 +67,11 @@ class AccountsReceivableController extends Controller
                 'c.name as cliente',
                 'c.mobile as telefono',
                 DB::raw('COUNT(t.id) as total_facturas'),
-                DB::raw('SUM(t.final_total - t.total_paid) as saldo_usd'),
+                DB::raw('SUM(t.final_total - COALESCE(tp_sum.total_paid, 0)) as saldo_usd'),
                 DB::raw('MIN(t.transaction_date) as primera_factura'),
                 DB::raw('MAX(t.transaction_date) as ultima_factura'),
-                DB::raw('SUM(CASE WHEN t.due_date < NOW() THEN (t.final_total - t.total_paid) ELSE 0 END) as vencido_usd'),
-                DB::raw('SUM(CASE WHEN t.due_date >= NOW() OR t.due_date IS NULL THEN (t.final_total - t.total_paid) ELSE 0 END) as por_vencer_usd'),
+                DB::raw('SUM(CASE WHEN t.due_date < NOW() THEN (t.final_total - COALESCE(tp_sum.total_paid, 0)) ELSE 0 END) as vencido_usd'),
+                DB::raw('SUM(CASE WHEN t.due_date >= NOW() OR t.due_date IS NULL THEN (t.final_total - COALESCE(tp_sum.total_paid, 0)) ELSE 0 END) as por_vencer_usd'),
             ])
             ->groupBy('c.id', 'c.name', 'c.mobile');
 
@@ -112,12 +122,22 @@ class AccountsReceivableController extends Controller
         $business_id = $request->session()->get('user.business_id');
         $bcv_rate    = getActiveBcvRate();
 
+        $payments_subquery = DB::table('transaction_payments as tp')
+            ->select([
+                'tp.transaction_id',
+                DB::raw('SUM(IF(tp.is_return = 1, -1 * tp.amount, tp.amount)) as total_paid'),
+            ])
+            ->groupBy('tp.transaction_id');
+
         $contact = Contact::where('business_id', $business_id)
             ->where('id', $contact_id)
             ->firstOrFail();
 
         $facturas = DB::table('transactions as t')
             ->leftJoin('contacts as c', 'c.id', '=', 't.contact_id')
+            ->leftJoinSub($payments_subquery, 'tp_sum', function ($join) {
+                $join->on('tp_sum.transaction_id', '=', 't.id');
+            })
             ->where('t.business_id', $business_id)
             ->where('t.contact_id', $contact_id)
             ->where('t.type', 'sell')
@@ -125,10 +145,10 @@ class AccountsReceivableController extends Controller
             ->whereIn('t.payment_status', ['due', 'partial'])
             ->selectRaw('
                 t.id, t.invoice_no, t.transaction_date, t.pay_term_number, t.pay_term_type,
-                t.final_total, t.total_paid,
+                t.final_total, COALESCE(tp_sum.total_paid, 0) as total_paid,
                 t.payment_status,
-                (t.final_total - t.total_paid) as balance_usd,
-                (t.final_total - t.total_paid) * ? as balance_bs,
+                (t.final_total - COALESCE(tp_sum.total_paid, 0)) as balance_usd,
+                (t.final_total - COALESCE(tp_sum.total_paid, 0)) * ? as balance_bs,
                 GREATEST(0, DATEDIFF(CURDATE(),
                     CASE WHEN t.pay_term_type="days"
                          THEN DATE_ADD(t.transaction_date, INTERVAL t.pay_term_number DAY)
@@ -162,8 +182,18 @@ class AccountsReceivableController extends Controller
         $business_id = $request->session()->get('user.business_id');
         $bcv_rate    = getActiveBcvRate();
 
+        $payments_subquery = DB::table('transaction_payments as tp')
+            ->select([
+                'tp.transaction_id',
+                DB::raw('SUM(IF(tp.is_return = 1, -1 * tp.amount, tp.amount)) as total_paid'),
+            ])
+            ->groupBy('tp.transaction_id');
+
         $rows = DB::table('transactions as t')
             ->join('contacts as c', 't.contact_id', '=', 'c.id')
+            ->leftJoinSub($payments_subquery, 'tp_sum', function ($join) {
+                $join->on('tp_sum.transaction_id', '=', 't.id');
+            })
             ->where('t.business_id', $business_id)
             ->where('t.type', 'sell')
             ->where('t.status', 'final')
@@ -172,8 +202,8 @@ class AccountsReceivableController extends Controller
                 'c.name as Cliente',
                 'c.mobile as Teléfono',
                 DB::raw('COUNT(t.id) as "N° Facturas"'),
-                DB::raw('SUM(t.final_total - t.total_paid) as "Saldo USD"'),
-                DB::raw('SUM((t.final_total - t.total_paid) * ' . (float) $bcv_rate . ') as "Saldo Bs"'),
+                DB::raw('SUM(t.final_total - COALESCE(tp_sum.total_paid, 0)) as "Saldo USD"'),
+                DB::raw('SUM((t.final_total - COALESCE(tp_sum.total_paid, 0)) * ' . (float) $bcv_rate . ') as "Saldo Bs"'),
                 DB::raw('MIN(t.transaction_date) as "Primera Factura"'),
                 DB::raw('MAX(t.transaction_date) as "Última Factura"'),
             ])

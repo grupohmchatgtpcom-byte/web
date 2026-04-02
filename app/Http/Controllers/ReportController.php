@@ -29,6 +29,7 @@ use App\Variation;
 use Datatables;
 use DB;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Spatie\Activitylog\Models\Activity;
 
 class ReportController extends Controller
@@ -4658,6 +4659,333 @@ class ReportController extends Controller
             'date', 'resumen', 'cobros_por_metodo', 'cash_register',
             'locations', 'location_id', 'bcv_rate'
         ));
+    }
+
+    /**
+     * Reporte de Cierre estilo operativo (tabla dinámica por período).
+     * GET /reports/reporte-cierre
+     */
+    public function closureReport(Request $request)
+    {
+        if (! auth()->user()->can('purchase_n_sell_report.view')) {
+            abort(403, 'No autorizado');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $start_date  = $request->get('start_date', now()->startOfMonth()->toDateString());
+        $end_date    = $request->get('end_date', now()->toDateString());
+        $location_id = $request->get('location_id');
+
+        if ($request->ajax()) {
+            $has_amount_in_usd = Schema::hasColumn('transaction_payments', 'amount_in_usd');
+            $has_amount_in_bs = Schema::hasColumn('transaction_payments', 'amount_in_bs');
+            $has_currency_code = Schema::hasColumn('transaction_payments', 'currency_code');
+            $has_exchange_rate_used = Schema::hasColumn('transaction_payments', 'exchange_rate_used');
+            $has_is_advance = Schema::hasColumn('transaction_payments', 'is_advance');
+
+            $usd_amount_expr = $has_amount_in_usd ? 'COALESCE(tp.amount_in_usd, tp.amount)' : 'tp.amount';
+            $bs_amount_expr = $has_amount_in_bs ? 'COALESCE(tp.amount_in_bs, tp.amount)' : 'tp.amount';
+            $advance_condition = $has_is_advance ? 'tp.is_advance = 1' : 'tp.method = "advance"';
+
+            if ($has_currency_code && $has_exchange_rate_used) {
+                $advance_amount_expr = 'COALESCE(tp.amount_in_usd, IF(tp.currency_code = "VES", tp.amount / NULLIF(tp.exchange_rate_used, 0), tp.amount))';
+                $dolar_expr = 'SUM(CASE WHEN tp.currency_code <> "VES" AND tp.method = "cash" THEN ' . $usd_amount_expr . ' ELSE 0 END) as dolar_usd';
+                $transf_dola_expr = 'SUM(CASE WHEN tp.currency_code <> "VES" AND tp.method IN ("bank_transfer", "card", "cheque") THEN ' . $usd_amount_expr . ' ELSE 0 END) as transf_dola_usd';
+                $efectivo_bs_expr = 'SUM(CASE WHEN tp.currency_code = "VES" AND tp.method = "cash" THEN ' . $bs_amount_expr . ' ELSE 0 END) as efectivo_bs';
+                $transf_bs_expr = 'SUM(CASE WHEN tp.currency_code = "VES" AND tp.method IN ("bank_transfer", "card", "cheque") THEN ' . $bs_amount_expr . ' ELSE 0 END) as transf_bs';
+            } else {
+                $advance_amount_expr = $usd_amount_expr;
+                $dolar_expr = 'SUM(CASE WHEN tp.method = "cash" THEN ' . $usd_amount_expr . ' ELSE 0 END) as dolar_usd';
+                $transf_dola_expr = 'SUM(CASE WHEN tp.method IN ("bank_transfer", "card", "cheque") THEN ' . $usd_amount_expr . ' ELSE 0 END) as transf_dola_usd';
+                $efectivo_bs_expr = '0 as efectivo_bs';
+                $transf_bs_expr = '0 as transf_bs';
+            }
+
+            if ($has_exchange_rate_used) {
+                $rate_expr = 'AVG(NULLIF(tp.exchange_rate_used, 0)) as tasa_pago';
+            } else {
+                $rate_expr = 'NULL as tasa_pago';
+            }
+
+            $payments_subquery = DB::table('transaction_payments as tp')
+                ->select([
+                    'tp.transaction_id',
+                    DB::raw('SUM(IF(tp.is_return = 1, -1 * tp.amount, tp.amount)) as total_pagado'),
+                    DB::raw('SUM(CASE WHEN ' . $advance_condition . ' THEN ' . $advance_amount_expr . ' ELSE 0 END) as antic_usd'),
+                    DB::raw($dolar_expr),
+                    DB::raw($transf_dola_expr),
+                    DB::raw($efectivo_bs_expr),
+                    DB::raw($transf_bs_expr),
+                    DB::raw($rate_expr),
+                ])
+                ->groupBy('tp.transaction_id');
+
+            $query = DB::table('transactions as t')
+                ->leftJoinSub($payments_subquery, 'tp_sum', function ($join) {
+                    $join->on('tp_sum.transaction_id', '=', 't.id');
+                })
+                ->leftJoin('contacts as c', 'c.id', '=', 't.contact_id')
+                ->leftJoin('users as u', 'u.id', '=', 't.created_by')
+                ->leftJoin('users as v', 'v.id', '=', 't.commission_agent')
+                ->where('t.business_id', $business_id)
+                ->whereIn('t.type', ['sell', 'sell_return'])
+                ->whereDate('t.transaction_date', '>=', $start_date)
+                ->whereDate('t.transaction_date', '<=', $end_date)
+                ->when($location_id, fn($q) => $q->where('t.location_id', $location_id))
+                ->selectRaw('
+                    t.id,
+                    DATE(t.transaction_date) as fecha,
+                    CASE WHEN t.type = "sell_return" THEN "DEV" ELSE "FAC" END as tipo,
+                    COALESCE(t.invoice_no, t.ref_no, CONCAT("DOC-", t.id)) as documento,
+                    COALESCE(tp_sum.total_pagado, 0) as monto_pagado,
+                    COALESCE(t.payment_status, "") as tipo_pagado,
+                    COALESCE(c.contact_id, "") as codigo_cliente,
+                    COALESCE(c.name, "CONSUMIDOR FINAL") as nombre_cliente,
+                    COALESCE(u.username, "") as usuario,
+                    COALESCE(v.username, "") as vendedor,
+                    COALESCE(t.final_total, 0) as total_doc,
+                    LEAST(COALESCE(tp_sum.total_pagado, 0), COALESCE(t.final_total, 0)) as contado,
+                    GREATEST(COALESCE(t.final_total, 0) - COALESCE(tp_sum.total_pagado, 0), 0) as credito,
+                    COALESCE(tp_sum.antic_usd, 0) as antic,
+                    COALESCE(tp_sum.dolar_usd, 0) as dolar,
+                    COALESCE(tp_sum.transf_dola_usd, 0) as transf_dola,
+                    COALESCE(tp_sum.efectivo_bs, 0) as efectivo_bs,
+                    COALESCE(tp_sum.transf_bs, 0) as transf_bs,
+                    COALESCE(t.ghm_bcv_rate, tp_sum.tasa_pago, 1) as tasa,
+                    CASE
+                        WHEN t.discount_type = "percentage" THEN COALESCE(t.discount_amount, 0)
+                        WHEN COALESCE(t.total_before_tax, 0) > 0 THEN (COALESCE(t.discount_amount, 0) / t.total_before_tax) * 100
+                        ELSE 0
+                    END as dcto_porcentaje,
+                    COALESCE(t.additional_notes, "") as comentario
+                ')
+                ->orderBy('t.transaction_date', 'asc')
+                ->orderBy('t.id', 'asc');
+
+            return datatables()->of($query)
+                ->editColumn('monto_pagado', fn($row) => number_format((float) $row->monto_pagado, 2, ',', '.'))
+                ->editColumn('total_doc', fn($row) => number_format((float) $row->total_doc, 2, ',', '.'))
+                ->editColumn('contado', fn($row) => number_format((float) $row->contado, 2, ',', '.'))
+                ->editColumn('credito', fn($row) => number_format((float) $row->credito, 2, ',', '.'))
+                ->editColumn('antic', fn($row) => number_format((float) $row->antic, 2, ',', '.'))
+                ->editColumn('dolar', fn($row) => number_format((float) $row->dolar, 2, ',', '.'))
+                ->editColumn('transf_dola', fn($row) => number_format((float) $row->transf_dola, 2, ',', '.'))
+                ->editColumn('efectivo_bs', fn($row) => number_format((float) $row->efectivo_bs, 2, ',', '.'))
+                ->editColumn('transf_bs', fn($row) => number_format((float) $row->transf_bs, 2, ',', '.'))
+                ->addColumn('tasa_editable', function ($row) {
+                    return '<input type="text" class="form-control input-sm cierre-tasa text-right" data-id="' . $row->id . '" value="' . number_format((float) $row->tasa, 2, ',', '.') . '">';
+                })
+                ->addColumn('dcto_editable', function ($row) {
+                    return '<input type="text" class="form-control input-sm cierre-dcto text-right" data-id="' . $row->id . '" value="' . number_format((float) $row->dcto_porcentaje, 2, ',', '.') . '">';
+                })
+                ->addColumn('comentario_editable', function ($row) {
+                    $escaped = e($row->comentario);
+                    return '<div style="display:flex; gap:6px; min-width:220px;">'
+                        . '<input type="text" class="form-control input-sm cierre-comentario" data-id="' . $row->id . '" value="' . $escaped . '">'
+                        . '<button class="btn btn-xs btn-primary btn-save-cierre" data-id="' . $row->id . '"><i class="fa fa-save"></i></button>'
+                        . '</div>';
+                })
+                ->rawColumns(['tasa_editable', 'dcto_editable', 'comentario_editable'])
+                ->make(true);
+        }
+
+        $locations = BusinessLocation::forDropdown($business_id, true);
+        return view('report.reporte_cierre', compact('start_date', 'end_date', 'location_id', 'locations'));
+    }
+
+    /**
+    * Actualiza datos operativos desde la tabla dinámica del reporte de cierre.
+     */
+    public function updateClosureComment(Request $request)
+    {
+        if (! auth()->user()->can('purchase_n_sell_report.view')) {
+            abort(403, 'No autorizado');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+
+        $request->validate([
+            'transaction_id' => 'required|integer',
+            'comentario' => 'nullable|string|max:500',
+            'tasa' => 'nullable|numeric|min:0',
+            'dcto_porcentaje' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        $tx = Transaction::where('business_id', $business_id)
+            ->where('id', $request->transaction_id)
+            ->first();
+
+        if (empty($tx)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Documento no encontrado',
+            ], 404);
+        }
+
+        $payload = [
+            'additional_notes' => $request->comentario,
+        ];
+
+        if ($request->filled('tasa')) {
+            $payload['ghm_bcv_rate'] = (float) $request->tasa;
+        }
+        if ($request->filled('dcto_porcentaje')) {
+            $payload['discount_type'] = 'percentage';
+            $payload['discount_amount'] = (float) $request->dcto_porcentaje;
+        }
+
+        $updated = Transaction::where('business_id', $business_id)
+            ->where('id', $request->transaction_id)
+            ->update($payload);
+
+        return response()->json([
+            'ok' => $updated > 0,
+            'message' => $updated > 0 ? 'Fila actualizada' : 'No se pudo actualizar',
+        ]);
+    }
+
+    /**
+     * Exporta el Reporte de Cierre a CSV por período.
+     */
+    public function exportClosureReport(Request $request)
+    {
+        if (! auth()->user()->can('purchase_n_sell_report.view')) {
+            abort(403, 'No autorizado');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $start_date  = $request->get('start_date', now()->startOfMonth()->toDateString());
+        $end_date    = $request->get('end_date', now()->toDateString());
+        $location_id = $request->get('location_id');
+
+        $has_amount_in_usd = Schema::hasColumn('transaction_payments', 'amount_in_usd');
+        $has_amount_in_bs = Schema::hasColumn('transaction_payments', 'amount_in_bs');
+        $has_currency_code = Schema::hasColumn('transaction_payments', 'currency_code');
+        $has_exchange_rate_used = Schema::hasColumn('transaction_payments', 'exchange_rate_used');
+        $has_is_advance = Schema::hasColumn('transaction_payments', 'is_advance');
+
+        $usd_amount_expr = $has_amount_in_usd ? 'COALESCE(tp.amount_in_usd, tp.amount)' : 'tp.amount';
+        $bs_amount_expr = $has_amount_in_bs ? 'COALESCE(tp.amount_in_bs, tp.amount)' : 'tp.amount';
+        $advance_condition = $has_is_advance ? 'tp.is_advance = 1' : 'tp.method = "advance"';
+
+        if ($has_currency_code && $has_exchange_rate_used) {
+            $advance_amount_expr = 'COALESCE(tp.amount_in_usd, IF(tp.currency_code = "VES", tp.amount / NULLIF(tp.exchange_rate_used, 0), tp.amount))';
+            $dolar_expr = 'SUM(CASE WHEN tp.currency_code <> "VES" AND tp.method = "cash" THEN ' . $usd_amount_expr . ' ELSE 0 END) as dolar_usd';
+            $transf_dola_expr = 'SUM(CASE WHEN tp.currency_code <> "VES" AND tp.method IN ("bank_transfer", "card", "cheque") THEN ' . $usd_amount_expr . ' ELSE 0 END) as transf_dola_usd';
+            $efectivo_bs_expr = 'SUM(CASE WHEN tp.currency_code = "VES" AND tp.method = "cash" THEN ' . $bs_amount_expr . ' ELSE 0 END) as efectivo_bs';
+            $transf_bs_expr = 'SUM(CASE WHEN tp.currency_code = "VES" AND tp.method IN ("bank_transfer", "card", "cheque") THEN ' . $bs_amount_expr . ' ELSE 0 END) as transf_bs';
+        } else {
+            $advance_amount_expr = $usd_amount_expr;
+            $dolar_expr = 'SUM(CASE WHEN tp.method = "cash" THEN ' . $usd_amount_expr . ' ELSE 0 END) as dolar_usd';
+            $transf_dola_expr = 'SUM(CASE WHEN tp.method IN ("bank_transfer", "card", "cheque") THEN ' . $usd_amount_expr . ' ELSE 0 END) as transf_dola_usd';
+            $efectivo_bs_expr = '0 as efectivo_bs';
+            $transf_bs_expr = '0 as transf_bs';
+        }
+
+        if ($has_exchange_rate_used) {
+            $rate_expr = 'AVG(NULLIF(tp.exchange_rate_used, 0)) as tasa_pago';
+        } else {
+            $rate_expr = 'NULL as tasa_pago';
+        }
+
+        $payments_subquery = DB::table('transaction_payments as tp')
+            ->select([
+                'tp.transaction_id',
+                DB::raw('SUM(IF(tp.is_return = 1, -1 * tp.amount, tp.amount)) as total_pagado'),
+                DB::raw('SUM(CASE WHEN ' . $advance_condition . ' THEN ' . $advance_amount_expr . ' ELSE 0 END) as antic_usd'),
+                DB::raw($dolar_expr),
+                DB::raw($transf_dola_expr),
+                DB::raw($efectivo_bs_expr),
+                DB::raw($transf_bs_expr),
+                DB::raw($rate_expr),
+            ])
+            ->groupBy('tp.transaction_id');
+
+        $rows = DB::table('transactions as t')
+            ->leftJoinSub($payments_subquery, 'tp_sum', function ($join) {
+                $join->on('tp_sum.transaction_id', '=', 't.id');
+            })
+            ->leftJoin('contacts as c', 'c.id', '=', 't.contact_id')
+            ->leftJoin('users as u', 'u.id', '=', 't.created_by')
+            ->leftJoin('users as v', 'v.id', '=', 't.commission_agent')
+            ->where('t.business_id', $business_id)
+            ->whereIn('t.type', ['sell', 'sell_return'])
+            ->whereDate('t.transaction_date', '>=', $start_date)
+            ->whereDate('t.transaction_date', '<=', $end_date)
+            ->when($location_id, fn($q) => $q->where('t.location_id', $location_id))
+            ->selectRaw('
+                DATE(t.transaction_date) as fecha,
+                CASE WHEN t.type = "sell_return" THEN "DEV" ELSE "FAC" END as tipo,
+                COALESCE(t.invoice_no, t.ref_no, CONCAT("DOC-", t.id)) as documento,
+                COALESCE(tp_sum.total_pagado, 0) as monto_pagado,
+                COALESCE(t.payment_status, "") as tipo_pagado,
+                COALESCE(c.contact_id, "") as codigo_cliente,
+                COALESCE(c.name, "CONSUMIDOR FINAL") as nombre_cliente,
+                COALESCE(u.username, "") as usuario,
+                COALESCE(v.username, "") as vendedor,
+                COALESCE(t.final_total, 0) as total_doc,
+                LEAST(COALESCE(tp_sum.total_pagado, 0), COALESCE(t.final_total, 0)) as contado,
+                GREATEST(COALESCE(t.final_total, 0) - COALESCE(tp_sum.total_pagado, 0), 0) as credito,
+                COALESCE(tp_sum.antic_usd, 0) as antic,
+                COALESCE(tp_sum.dolar_usd, 0) as dolar,
+                COALESCE(tp_sum.transf_dola_usd, 0) as transf_dola,
+                COALESCE(tp_sum.efectivo_bs, 0) as efectivo_bs,
+                COALESCE(tp_sum.transf_bs, 0) as transf_bs,
+                COALESCE(t.ghm_bcv_rate, tp_sum.tasa_pago, 1) as tasa,
+                CASE
+                    WHEN t.discount_type = "percentage" THEN COALESCE(t.discount_amount, 0)
+                    WHEN COALESCE(t.total_before_tax, 0) > 0 THEN (COALESCE(t.discount_amount, 0) / t.total_before_tax) * 100
+                    ELSE 0
+                END as dcto_porcentaje,
+                COALESCE(t.additional_notes, "") as comentario
+            ')
+            ->orderBy('t.transaction_date', 'asc')
+            ->orderBy('t.id', 'asc')
+            ->get();
+
+        $filename = 'reporte_cierre_' . $start_date . '_al_' . $end_date . '.csv';
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ];
+
+        return response()->stream(function () use ($rows, $start_date, $end_date) {
+            $out = fopen('php://output', 'w');
+            fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+            fputcsv($out, ['REPORTE CIERRE DE CAJA', 'Periodo: ' . $start_date . ' al ' . $end_date], ';');
+            fputcsv($out, [], ';');
+            fputcsv($out, [
+                'Fecha', 'Tipo', 'Documento', 'Monto Pagado', 'TipoP', 'Codigo Cliente', 'Nombre Cliente',
+                'Usuario', 'Vendedor', 'TotalDoc', 'Contado', 'Credito', 'Antic', 'Dolar', 'Transf Dola',
+                'Efectivo Bs', 'Transf Bs', 'Tasa', 'Dcto%', 'Comentario'
+            ], ';');
+
+            foreach ($rows as $r) {
+                fputcsv($out, [
+                    $r->fecha,
+                    $r->tipo,
+                    $r->documento,
+                    number_format((float) $r->monto_pagado, 2, '.', ''),
+                    $r->tipo_pagado,
+                    $r->codigo_cliente,
+                    $r->nombre_cliente,
+                    $r->usuario,
+                    $r->vendedor,
+                    number_format((float) $r->total_doc, 2, '.', ''),
+                    number_format((float) $r->contado, 2, '.', ''),
+                    number_format((float) $r->credito, 2, '.', ''),
+                    number_format((float) $r->antic, 2, '.', ''),
+                    number_format((float) $r->dolar, 2, '.', ''),
+                    number_format((float) $r->transf_dola, 2, '.', ''),
+                    number_format((float) $r->efectivo_bs, 2, '.', ''),
+                    number_format((float) $r->transf_bs, 2, '.', ''),
+                    number_format((float) $r->tasa, 2, '.', ''),
+                    number_format((float) $r->dcto_porcentaje, 2, '.', ''),
+                    $r->comentario,
+                ], ';');
+            }
+            fclose($out);
+        }, 200, $headers);
     }
 
     // =========================================================================

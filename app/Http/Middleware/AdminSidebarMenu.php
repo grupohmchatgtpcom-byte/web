@@ -821,6 +821,11 @@ class AdminSidebarMenu
                                 'Cierre de Caja',
                                 ['icon' => '', 'active' => request()->segment(2) == 'cash-register-close']
                             );
+                            $sub->url(
+                                route('reports.closure_report'),
+                                'Reporte de Cierre',
+                                ['icon' => '', 'active' => request()->segment(2) == 'reporte-cierre']
+                            );
                         }
                         if ($is_admin) {
                             $sub->url(

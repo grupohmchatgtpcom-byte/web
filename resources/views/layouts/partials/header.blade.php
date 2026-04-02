@@ -188,7 +188,7 @@
                 </button>
 
                 <div
-                    class="tw-inline-flex tw-items-center tw-gap-1 tw-py-1.5 tw-px-3 tw-rounded-lg tw-bg-amber-100 tw-text-amber-900 tw-text-sm tw-ring-1 tw-ring-amber-300/80">
+                    class="tw-inline-flex tw-items-center tw-gap-1 tw-py-1.5 tw-px-3 tw-rounded-lg tw-bg-white/10 tw-text-white tw-text-sm tw-ring-1 tw-ring-white/20">
                     <span class="tw-font-bold">Tasa del dia:</span>
                     @if (!empty($header_bcv_rate_info['usd_to_ves_rate']))
                         <span class="tw-font-semibold">{{ number_format((float) $header_bcv_rate_info['usd_to_ves_rate'], 2, '.', ',') }} Bs/USD</span>

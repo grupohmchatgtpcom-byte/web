@@ -26,3 +26,8 @@ npm-debug.log
 /public/docs
 /public/js/skins/
 /public/js/icons/
+# SQL dumps locales
+/sistema.sql
+/tiendas.sql
+/tiendas_para_sistema.sql
+

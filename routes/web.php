@@ -275,6 +275,9 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/reports/libro-compras', [ReportController::class, 'libroCompras'])->name('reports.libro_compras');
     Route::get('/reports/cash-register-close', [ReportController::class, 'cashRegisterClose'])->name('reports.cash_register_close');
     Route::get('/reports/cash-register-close/export', [ReportController::class, 'exportCashRegisterClose'])->name('reports.cash_register_close.export');
+    Route::get('/reports/reporte-cierre', [ReportController::class, 'closureReport'])->name('reports.closure_report');
+    Route::get('/reports/reporte-cierre/export', [ReportController::class, 'exportClosureReport'])->name('reports.closure_report.export');
+    Route::post('/reports/reporte-cierre/update-comment', [ReportController::class, 'updateClosureComment'])->name('reports.closure_report.update_comment');
     Route::get('/reports/auditoria-operativa', [\App\Http\Controllers\OperationLogController::class, 'index'])->name('reports.auditoria_operativa');
     Route::get('/reports/auditoria-operativa/export', [\App\Http\Controllers\OperationLogController::class, 'exportCsv'])->name('reports.auditoria_operativa.export');
     Route::get('/reports/accounts-receivable', [AccountsReceivableController::class, 'index'])->name('reports.cxc');
