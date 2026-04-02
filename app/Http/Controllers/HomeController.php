@@ -1,0 +1,936 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\BusinessLocation;
+use App\Charts\CommonChart;
+use App\Currency;
+use App\Media;
+use App\Transaction;
+use App\User;
+use App\Utils\BusinessUtil;
+use App\Utils\ModuleUtil;
+use App\Utils\RestaurantUtil;
+use App\Utils\TransactionUtil;
+use App\Utils\ProductUtil;
+use App\Utils\Util;
+use App\VariationLocationDetails;
+use Datatables;
+use DB;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Http\Request;
+use Illuminate\Notifications\DatabaseNotification;
+
+class HomeController extends Controller
+{
+    /**
+     * All Utils instance.
+     */
+    protected $businessUtil;
+
+    protected $transactionUtil;
+
+    protected $moduleUtil;
+
+    protected $commonUtil;
+
+    protected $restUtil;
+    protected $productUtil;
+
+    /**
+     * Create a new controller instance.
+     *
+     * @return void
+     */
+    public function __construct(
+        BusinessUtil $businessUtil,
+        TransactionUtil $transactionUtil,
+        ModuleUtil $moduleUtil,
+        Util $commonUtil,
+        RestaurantUtil $restUtil,
+        ProductUtil $productUtil,
+    ) {
+        $this->businessUtil = $businessUtil;
+        $this->transactionUtil = $transactionUtil;
+        $this->moduleUtil = $moduleUtil;
+        $this->commonUtil = $commonUtil;
+        $this->restUtil = $restUtil;
+        $this->productUtil = $productUtil;
+    }
+
+    /**
+     * Show the application dashboard.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function index()
+    {
+        $user = auth()->user();
+        if ($user->user_type == 'user_customer') {
+            return redirect()->action([\Modules\Crm\Http\Controllers\DashboardController::class, 'index']);
+        }
+
+        $business_id = request()->session()->get('user.business_id');
+
+        $is_admin = $this->businessUtil->is_admin(auth()->user());
+
+        if (! auth()->user()->can('dashboard.data')) {
+            return view('home.index');
+        }
+
+        $fy = $this->businessUtil->getCurrentFinancialYear($business_id);
+
+        $currency = Currency::where('id', request()->session()->get('business.currency_id'))->first();
+        //ensure start date starts from at least 30 days before to get sells last 30 days
+        $least_30_days = \Carbon::parse($fy['start'])->subDays(30)->format('Y-m-d');
+
+        //get all sells
+        $sells_this_fy = $this->transactionUtil->getSellsCurrentFy($business_id, $least_30_days, $fy['end']);
+
+        $all_locations = BusinessLocation::forDropdown($business_id)->toArray();
+
+        //Chart for sells last 30 days
+        $labels = [];
+        $all_sell_values = [];
+        $dates = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $date = \Carbon::now()->subDays($i)->format('Y-m-d');
+            $dates[] = $date;
+
+            $labels[] = date('j M Y', strtotime($date));
+
+            $total_sell_on_date = $sells_this_fy->where('date', $date)->sum('total_sells');
+
+            if (! empty($total_sell_on_date)) {
+                $all_sell_values[] = (float) $total_sell_on_date;
+            } else {
+                $all_sell_values[] = 0;
+            }
+        }
+
+        //Group sells by location
+        $location_sells = [];
+        foreach ($all_locations as $loc_id => $loc_name) {
+            $values = [];
+            foreach ($dates as $date) {
+                $total_sell_on_date_location = $sells_this_fy->where('date', $date)->where('location_id', $loc_id)->sum('total_sells');
+
+                if (! empty($total_sell_on_date_location)) {
+                    $values[] = (float) $total_sell_on_date_location;
+                } else {
+                    $values[] = 0;
+                }
+            }
+            $location_sells[$loc_id]['loc_label'] = $loc_name;
+            $location_sells[$loc_id]['values'] = $values;
+        }
+
+        $sells_chart_1 = new CommonChart;
+
+        $sells_chart_1->labels($labels)
+                        ->options($this->__chartOptions(__(
+                            'home.total_sells',
+                            ['currency' => $currency->code]
+                            )));
+
+        if (! empty($location_sells)) {
+            foreach ($location_sells as $location_sell) {
+                $sells_chart_1->dataset($location_sell['loc_label'], 'line', $location_sell['values']);
+            }
+        }
+
+        if (count($all_locations) > 1) {
+            $sells_chart_1->dataset(__('report.all_locations'), 'line', $all_sell_values);
+        }
+
+        $labels = [];
+        $values = [];
+        $date = strtotime($fy['start']);
+        $last = date('m-Y', strtotime($fy['end']));
+        $fy_months = [];
+        do {
+            $month_year = date('m-Y', $date);
+            $fy_months[] = $month_year;
+
+            $labels[] = \Carbon::createFromFormat('m-Y', $month_year)
+                            ->format('M-Y');
+            $date = strtotime('+1 month', $date);
+
+            $total_sell_in_month_year = $sells_this_fy->where('yearmonth', $month_year)->sum('total_sells');
+
+            if (! empty($total_sell_in_month_year)) {
+                $values[] = (float) $total_sell_in_month_year;
+            } else {
+                $values[] = 0;
+            }
+        } while ($month_year != $last);
+
+        $fy_sells_by_location_data = [];
+
+        foreach ($all_locations as $loc_id => $loc_name) {
+            $values_data = [];
+            foreach ($fy_months as $month) {
+                $total_sell_in_month_year_location = $sells_this_fy->where('yearmonth', $month)->where('location_id', $loc_id)->sum('total_sells');
+
+                if (! empty($total_sell_in_month_year_location)) {
+                    $values_data[] = (float) $total_sell_in_month_year_location;
+                } else {
+                    $values_data[] = 0;
+                }
+            }
+            $fy_sells_by_location_data[$loc_id]['loc_label'] = $loc_name;
+            $fy_sells_by_location_data[$loc_id]['values'] = $values_data;
+        }
+
+        $sells_chart_2 = new CommonChart;
+        $sells_chart_2->labels($labels)
+                    ->options($this->__chartOptions(__(
+                        'home.total_sells',
+                        ['currency' => $currency->code]
+                            )));
+        if (! empty($fy_sells_by_location_data)) {
+            foreach ($fy_sells_by_location_data as $location_sell) {
+                $sells_chart_2->dataset($location_sell['loc_label'], 'line', $location_sell['values']);
+            }
+        }
+        if (count($all_locations) > 1) {
+            $sells_chart_2->dataset(__('report.all_locations'), 'line', $values);
+        }
+
+        //Get Dashboard widgets from module
+        $module_widgets = $this->moduleUtil->getModuleData('dashboard_widget');
+
+        $widgets = [];
+
+        foreach ($module_widgets as $widget_array) {
+            if (! empty($widget_array['position'])) {
+                $widgets[$widget_array['position']][] = $widget_array['widget'];
+            }
+        }
+
+        $common_settings = ! empty(session('business.common_settings')) ? session('business.common_settings') : [];
+        $bcv_rate_info = $this->getCurrentBcvRate();
+
+        return view('home.index', compact('sells_chart_1', 'sells_chart_2', 'widgets', 'all_locations', 'common_settings', 'is_admin', 'bcv_rate_info'));
+    }
+
+    /**
+     * Returns JSON data for the gerencial dashboard widgets:
+     * today's sales, top overdue CxC, top 10 products of the month, monthly comparison chart.
+     */
+    public function getDashboardGerencialData(Request $request)
+    {
+        if (! $request->ajax()) {
+            abort(403);
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $bcv_rate    = getActiveBcvRate() ?? 0;
+
+        // Ventas de hoy
+        $today_start = \Carbon\Carbon::today()->toDateTimeString();
+        $today_end   = \Carbon\Carbon::today()->endOfDay()->toDateTimeString();
+
+        $today_usd = \App\Models\Transaction::where('business_id', $business_id)
+            ->where('type', 'sell')
+            ->where('status', 'final')
+            ->whereBetween('transaction_date', [$today_start, $today_end])
+            ->sum('final_total');
+
+        $today_bs = $today_usd * $bcv_rate;
+
+        // Top 5 CxC vencidas (por cliente)
+        $top_overdue = \App\Models\Transaction::from('transactions as t')
+            ->join('contacts as c', 'c.id', '=', 't.contact_id')
+            ->where('t.business_id', $business_id)
+            ->where('t.type', 'sell')
+            ->where('t.status', 'final')
+            ->whereIn('t.payment_status', ['due', 'partial'])
+            ->where('t.transaction_date', '<', \Carbon\Carbon::today())
+            ->select(
+                'c.id as contact_id',
+                'c.name as contact_name',
+                \DB::raw('SUM(t.final_total - t.total_paid) as balance_usd'),
+                \DB::raw('MIN(t.transaction_date) as oldest_date')
+            )
+            ->groupBy('c.id', 'c.name')
+            ->orderByDesc('balance_usd')
+            ->limit(5)
+            ->get()
+            ->map(function ($row) use ($bcv_rate) {
+                $row->balance_bs   = $row->balance_usd * $bcv_rate;
+                $row->days_overdue = \Carbon\Carbon::parse($row->oldest_date)->diffInDays(\Carbon\Carbon::today());
+                return $row;
+            });
+
+        // Top 10 productos más vendidos del mes
+        $month_start = \Carbon\Carbon::now()->startOfMonth()->toDateTimeString();
+        $month_end   = \Carbon\Carbon::now()->endOfMonth()->toDateTimeString();
+
+        $top_products = \DB::table('transaction_sell_lines as sl')
+            ->join('transactions as t', 't.id', '=', 'sl.transaction_id')
+            ->join('products as p', 'p.id', '=', 'sl.product_id')
+            ->where('t.business_id', $business_id)
+            ->where('t.type', 'sell')
+            ->where('t.status', 'final')
+            ->whereBetween('t.transaction_date', [$month_start, $month_end])
+            ->select(
+                'p.name as product_name',
+                \DB::raw('SUM(sl.quantity) as qty_sold'),
+                \DB::raw('SUM(sl.quantity * sl.unit_price_inc_tax) as total_usd')
+            )
+            ->groupBy('p.id', 'p.name')
+            ->orderByDesc('total_usd')
+            ->limit(10)
+            ->get();
+
+        // Comparativo mensual últimos 6 meses
+        $monthly_labels = [];
+        $monthly_values = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month          = \Carbon\Carbon::now()->subMonths($i);
+            $monthly_labels[] = $month->translatedFormat('M Y');
+            $m_start        = $month->copy()->startOfMonth()->toDateTimeString();
+            $m_end          = $month->copy()->endOfMonth()->toDateTimeString();
+            $monthly_values[] = (float) \App\Models\Transaction::where('business_id', $business_id)
+                ->where('type', 'sell')
+                ->where('status', 'final')
+                ->whereBetween('transaction_date', [$m_start, $m_end])
+                ->sum('final_total');
+        }
+
+        return response()->json([
+            'today_usd'      => (float) $today_usd,
+            'today_bs'       => (float) $today_bs,
+            'bcv_rate'       => (float) $bcv_rate,
+            'top_overdue'    => $top_overdue,
+            'top_products'   => $top_products,
+            'monthly_labels' => $monthly_labels,
+            'monthly_values' => $monthly_values,
+        ]);
+    }
+
+    /**
+     * Retrieves purchase and sell details for a given time period.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function getTotals()
+    {
+        if (request()->ajax()) {
+            $start = request()->start;
+            $end = request()->end;
+            $location_id = request()->location_id;
+            $business_id = request()->session()->get('user.business_id');
+
+            // get user id parameter
+            $created_by = request()->user_id;
+
+            $purchase_details = $this->transactionUtil->getPurchaseTotals($business_id, $start, $end, $location_id, $created_by);
+
+            $sell_details = $this->transactionUtil->getSellTotals($business_id, $start, $end, $location_id, $created_by);
+
+            $total_ledger_discount = $this->transactionUtil->getTotalLedgerDiscount($business_id, $start, $end);
+
+            $purchase_details['purchase_due'] = $purchase_details['purchase_due'] - $total_ledger_discount['total_purchase_discount'];
+
+            $transaction_types = [
+                'purchase_return', 'sell_return', 'expense',
+            ];
+
+            $transaction_totals = $this->transactionUtil->getTransactionTotals(
+                $business_id,
+                $transaction_types,
+                $start,
+                $end,
+                $location_id,
+                $created_by
+            );
+
+            $total_purchase_inc_tax = ! empty($purchase_details['total_purchase_inc_tax']) ? $purchase_details['total_purchase_inc_tax'] : 0;
+            $total_purchase_return_inc_tax = $transaction_totals['total_purchase_return_inc_tax'];
+
+            $output = $purchase_details;
+            $output['total_purchase'] = $total_purchase_inc_tax;
+            $output['total_purchase_return'] = $total_purchase_return_inc_tax;
+            $output['total_purchase_return_paid'] = $this->transactionUtil->getTotalPurchaseReturnPaid($business_id, $start, $end, $location_id);
+
+            $total_sell_inc_tax = ! empty($sell_details['total_sell_inc_tax']) ? $sell_details['total_sell_inc_tax'] : 0;
+            $total_sell_return_inc_tax = ! empty($transaction_totals['total_sell_return_inc_tax']) ? $transaction_totals['total_sell_return_inc_tax'] : 0;
+            $output['total_sell_return_paid'] = $this->transactionUtil->getTotalSellReturnPaid($business_id, $start, $end, $location_id);
+
+            $output['total_sell'] = $total_sell_inc_tax;
+            $output['total_sell_return'] = $total_sell_return_inc_tax;
+
+            $output['invoice_due'] = $sell_details['invoice_due'] - $total_ledger_discount['total_sell_discount'];
+            $output['total_expense'] = $transaction_totals['total_expense'];
+
+            //NET = TOTAL SALES - INVOICE DUE - EXPENSE
+            $output['net'] = $output['total_sell'] - $output['invoice_due'] - $output['total_expense'];
+            $output['bcv_rate_info'] = $this->getCurrentBcvRate();
+
+            return $output;
+        }
+    }
+
+    /**
+     * Obtiene la tasa BCV mas reciente guardada localmente.
+     */
+    protected function getCurrentBcvRate(): ?array
+    {
+        $candidateTables = ['ghm_bcv_rates', 'bcv_rates'];
+        $candidateColumns = ['usd_to_ves_rate', 'usd_to_bs', 'rate', 'value'];
+
+        foreach ($candidateTables as $table) {
+            if (! DB::getSchemaBuilder()->hasTable($table)) {
+                continue;
+            }
+
+            foreach ($candidateColumns as $rateColumn) {
+                if (! DB::getSchemaBuilder()->hasColumn($table, $rateColumn)) {
+                    continue;
+                }
+
+                $query = DB::table($table)->whereNotNull($rateColumn);
+
+                if (DB::getSchemaBuilder()->hasColumn($table, 'rate_date')) {
+                    $query->orderByDesc('rate_date');
+                }
+
+                if (DB::getSchemaBuilder()->hasColumn($table, 'id')) {
+                    $query->orderByDesc('id');
+                }
+
+                $rateRow = $query->first();
+
+                if (empty($rateRow)) {
+                    continue;
+                }
+
+                $rawRate = $rateRow->{$rateColumn};
+                $normalizedRate = is_numeric($rawRate)
+                    ? (float) $rawRate
+                    : (float) str_replace(',', '.', preg_replace('/[^0-9,.-]/', '', (string) $rawRate));
+
+                if ($normalizedRate <= 0) {
+                    continue;
+                }
+
+                return [
+                    'rate_date' => $rateRow->rate_date ?? null,
+                    'usd_to_ves_rate' => $normalizedRate,
+                    'source' => $rateRow->source ?? null,
+                    'is_fallback' => (int) ($rateRow->is_fallback ?? 0),
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Retrieves sell products whose available quntity is less than alert quntity.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function getProductStockAlert()
+    {
+        if (request()->ajax()) {
+            $business_id = request()->session()->get('user.business_id');
+            $permitted_locations = auth()->user()->permitted_locations();
+            $products = $this->productUtil->getProductAlert($business_id, $permitted_locations);
+
+            return Datatables::of($products)
+                ->editColumn('product', function ($row) {
+                    if ($row->type == 'single') {
+                        return $row->product.' ('.$row->sku.')';
+                    } else {
+                        return $row->product.' - '.$row->product_variation.' - '.$row->variation.' ('.$row->sub_sku.')';
+                    }
+                })
+                ->editColumn('stock', function ($row) {
+                    $stock = $row->stock ? $row->stock : 0;
+
+                    return '<span data-is_quantity="true" class="display_currency" data-currency_symbol=false>'.(float) $stock.'</span> '.$row->unit;
+                })
+                ->removeColumn('sku')
+                ->removeColumn('sub_sku')
+                ->removeColumn('unit')
+                ->removeColumn('type')
+                ->removeColumn('product_variation')
+                ->removeColumn('variation')
+                ->rawColumns([2])
+                ->make(false);
+        }
+    }
+
+    /**
+     * Retrieves payment dues for the purchases.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function getPurchasePaymentDues()
+    {
+        if (request()->ajax()) {
+            $business_id = request()->session()->get('user.business_id');
+            $today = \Carbon::now()->format('Y-m-d H:i:s');
+            $bcv_rate_info = $this->getCurrentBcvRate();
+            $bcv_rate_value = ! empty($bcv_rate_info['usd_to_ves_rate']) ? (float) $bcv_rate_info['usd_to_ves_rate'] : 0;
+
+            $query = Transaction::join(
+                'contacts as c',
+                'transactions.contact_id',
+                '=',
+                'c.id'
+            )
+                    ->leftJoin(
+                        'transaction_payments as tp',
+                        'transactions.id',
+                        '=',
+                        'tp.transaction_id'
+                    )
+                    ->where('transactions.business_id', $business_id)
+                    ->where('transactions.type', 'purchase')
+                    ->where('transactions.payment_status', '!=', 'paid')
+                    ->whereRaw("DATEDIFF( DATE_ADD( transaction_date, INTERVAL IF(transactions.pay_term_type = 'days', transactions.pay_term_number, 30 * transactions.pay_term_number) DAY), '$today') <= 7");
+
+            //Check for permitted locations of a user
+            $permitted_locations = auth()->user()->permitted_locations();
+            if ($permitted_locations != 'all') {
+                $query->whereIn('transactions.location_id', $permitted_locations);
+            }
+
+            if (! empty(request()->input('location_id'))) {
+                $query->where('transactions.location_id', request()->input('location_id'));
+            }
+
+            $dues = $query->select(
+                'transactions.id as id',
+                'c.name as supplier',
+                'c.supplier_business_name',
+                'ref_no',
+                'final_total',
+                DB::raw('SUM(tp.amount) as total_paid')
+            )
+                        ->groupBy('transactions.id');
+
+            return Datatables::of($dues)
+                ->addColumn('due', function ($row) use ($bcv_rate_value) {
+                    $total_paid = ! empty($row->total_paid) ? $row->total_paid : 0;
+                    $due = $row->final_total - $total_paid;
+                    $html = '<span class="display_currency" data-currency_symbol="true">'.$due.'</span>';
+
+                    if ($bcv_rate_value > 0) {
+                        $dueBs = $due * $bcv_rate_value;
+                        $html .= '<br><small class="text-muted">Bs '.number_format($dueBs, 2, '.', ',').'</small>';
+                    }
+
+                    return $html;
+                })
+                ->addColumn('action', '@can("purchase.create") <a href="{{action([\App\Http\Controllers\TransactionPaymentController::class, \'addPayment\'], [$id])}}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-accent add_payment_modal"><i class="fas fa-money-bill-alt"></i> @lang("purchase.add_payment")</a> @endcan')
+                ->removeColumn('supplier_business_name')
+                ->editColumn('supplier', '@if(!empty($supplier_business_name)) {{$supplier_business_name}}, <br> @endif {{$supplier}}')
+                ->editColumn('ref_no', function ($row) {
+                    if (auth()->user()->can('purchase.view')) {
+                        return  '<a href="#" data-href="'.action([\App\Http\Controllers\PurchaseController::class, 'show'], [$row->id]).'"
+                                    class="btn-modal" data-container=".view_modal">'.$row->ref_no.'</a>';
+                    }
+
+                    return $row->ref_no;
+                })
+                ->removeColumn('id')
+                ->removeColumn('final_total')
+                ->removeColumn('total_paid')
+                ->rawColumns([0, 1, 2, 3])
+                ->make(false);
+        }
+    }
+
+    /**
+     * Retrieves payment dues for the purchases.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function getSalesPaymentDues()
+    {
+        if (request()->ajax()) {
+            $business_id = request()->session()->get('user.business_id');
+            $today = \Carbon::now()->format('Y-m-d H:i:s');
+            $bcv_rate_info = $this->getCurrentBcvRate();
+            $bcv_rate_value = ! empty($bcv_rate_info['usd_to_ves_rate']) ? (float) $bcv_rate_info['usd_to_ves_rate'] : 0;
+
+            $query = Transaction::join(
+                'contacts as c',
+                'transactions.contact_id',
+                '=',
+                'c.id'
+            )
+                    ->leftJoin(
+                        'transaction_payments as tp',
+                        'transactions.id',
+                        '=',
+                        'tp.transaction_id'
+                    )
+                    ->where('transactions.business_id', $business_id)
+                    ->where('transactions.type', 'sell')
+                    ->where('transactions.payment_status', '!=', 'paid')
+                    ->whereNotNull('transactions.pay_term_number')
+                    ->whereNotNull('transactions.pay_term_type')
+                    ->whereRaw("DATEDIFF( DATE_ADD( transaction_date, INTERVAL IF(transactions.pay_term_type = 'days', transactions.pay_term_number, 30 * transactions.pay_term_number) DAY), '$today') <= 7");
+
+            //Check for permitted locations of a user
+            $permitted_locations = auth()->user()->permitted_locations();
+            if ($permitted_locations != 'all') {
+                $query->whereIn('transactions.location_id', $permitted_locations);
+            }
+
+            if (! empty(request()->input('location_id'))) {
+                $query->where('transactions.location_id', request()->input('location_id'));
+            }
+
+            $dues = $query->select(
+                'transactions.id as id',
+                'c.name as customer',
+                'c.supplier_business_name',
+                'transactions.invoice_no',
+                'final_total',
+                DB::raw('SUM(tp.amount) as total_paid')
+            )
+                        ->groupBy('transactions.id');
+
+            return Datatables::of($dues)
+                ->addColumn('due', function ($row) use ($bcv_rate_value) {
+                    $total_paid = ! empty($row->total_paid) ? $row->total_paid : 0;
+                    $due = $row->final_total - $total_paid;
+                    $html = '<span class="display_currency" data-currency_symbol="true">'.$due.'</span>';
+
+                    if ($bcv_rate_value > 0) {
+                        $dueBs = $due * $bcv_rate_value;
+                        $html .= '<br><small class="text-muted">Bs '.number_format($dueBs, 2, '.', ',').'</small>';
+                    }
+
+                    return $html;
+                })
+                ->editColumn('invoice_no', function ($row) {
+                    if (auth()->user()->can('sell.view')) {
+                        return  '<a href="#" data-href="'.action([\App\Http\Controllers\SellController::class, 'show'], [$row->id]).'"
+                                    class="btn-modal" data-container=".view_modal">'.$row->invoice_no.'</a>';
+                    }
+
+                    return $row->invoice_no;
+                })
+                ->addColumn('action', '@if(auth()->user()->can("sell.create") || auth()->user()->can("direct_sell.access")) <a href="{{action([\App\Http\Controllers\TransactionPaymentController::class, \'addPayment\'], [$id])}}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-accent add_payment_modal"><i class="fas fa-money-bill-alt"></i> @lang("purchase.add_payment")</a> @endif')
+                ->editColumn('customer', '@if(!empty($supplier_business_name)) {{$supplier_business_name}}, <br> @endif {{$customer}}')
+                ->removeColumn('supplier_business_name')
+                ->removeColumn('id')
+                ->removeColumn('final_total')
+                ->removeColumn('total_paid')
+                ->rawColumns([0, 1, 2, 3])
+                ->make(false);
+        }
+    }
+
+    public function loadMoreNotifications()
+    {
+        $notifications = auth()->user()->notifications()->orderBy('created_at', 'DESC')->paginate(10);
+
+        if (request()->input('page') == 1) {
+            auth()->user()->unreadNotifications->markAsRead();
+        }
+        $notifications_data = $this->commonUtil->parseNotifications($notifications);
+
+        return view('layouts.partials.notification_list', compact('notifications_data'));
+    }
+
+    /**
+     * Function to count total number of unread notifications
+     *
+     * @return json
+     */
+    public function getTotalUnreadNotifications()
+    {
+        $unread_notifications = auth()->user()->unreadNotifications;
+        $total_unread = $unread_notifications->count();
+
+        $notification_html = '';
+        $modal_notifications = [];
+        foreach ($unread_notifications as $unread_notification) {
+            if (isset($data['show_popup'])) {
+                $modal_notifications[] = $unread_notification;
+                $unread_notification->markAsRead();
+            }
+        }
+        if (! empty($modal_notifications)) {
+            $notification_html = view('home.notification_modal')->with(['notifications' => $modal_notifications])->render();
+        }
+
+        return [
+            'total_unread' => $total_unread,
+            'notification_html' => $notification_html,
+        ];
+    }
+
+    private function __chartOptions($title)
+    {
+        return [
+            'yAxis' => [
+                'title' => [
+                    'text' => $title,
+                ],
+            ],
+            'legend' => [
+                'align' => 'right',
+                'verticalAlign' => 'top',
+                'floating' => true,
+                'layout' => 'vertical',
+                'padding' => 20,
+            ],
+        ];
+    }
+
+    public function getCalendar()
+    {
+        $business_id = request()->session()->get('user.business_id');
+        $is_admin = $this->restUtil->is_admin(auth()->user(), $business_id);
+        $is_superadmin = auth()->user()->can('superadmin');
+        if (request()->ajax()) {
+            $data = [
+                'start_date' => request()->start,
+                'end_date' => request()->end,
+                'user_id' => ($is_admin || $is_superadmin) && ! empty(request()->user_id) ? request()->user_id : auth()->user()->id,
+                'location_id' => ! empty(request()->location_id) ? request()->location_id : null,
+                'business_id' => $business_id,
+                'events' => request()->events ?? [],
+                'color' => '#007FFF',
+            ];
+            $events = [];
+
+            if (in_array('bookings', $data['events'])) {
+                $events = $this->restUtil->getBookingsForCalendar($data);
+            }
+
+            $module_events = $this->moduleUtil->getModuleData('calendarEvents', $data);
+
+            foreach ($module_events as $module_event) {
+                $events = array_merge($events, $module_event);
+            }
+
+            return $events;
+        }
+
+        $all_locations = BusinessLocation::forDropdown($business_id)->toArray();
+        $users = [];
+        if ($is_admin) {
+            $users = User::forDropdown($business_id, false);
+        }
+
+        $event_types = [
+            'bookings' => [
+                'label' => __('restaurant.bookings'),
+                'color' => '#007FFF',
+            ],
+        ];
+        $module_event_types = $this->moduleUtil->getModuleData('eventTypes');
+        foreach ($module_event_types as $module_event_type) {
+            $event_types = array_merge($event_types, $module_event_type);
+        }
+
+        return view('home.calendar')->with(compact('all_locations', 'users', 'event_types'));
+    }
+
+    public function showBcvRate(Request $request)
+    {
+        $bcv_rate_info = $this->getCurrentBcvRate();
+        $has_bcv_table = DB::getSchemaBuilder()->hasTable('ghm_bcv_rates');
+        $filter_month = $request->query('filter_month');
+        $filter_date = $request->query('filter_date');
+        $history_rates = null;
+
+        if ($has_bcv_table) {
+            $query = DB::table('ghm_bcv_rates')
+                ->select([
+                    'id',
+                    'rate_date',
+                    'usd_to_bs',
+                    'usd_to_ves_rate',
+                    'source',
+                    'is_official',
+                    'is_fallback',
+                    'created_at',
+                ])
+                ->orderByDesc('rate_date')
+                ->orderByDesc('id');
+
+            if (! empty($filter_month) && preg_match('/^\d{4}-\d{2}$/', $filter_month)) {
+                $query->whereRaw("DATE_FORMAT(rate_date, '%Y-%m') = ?", [$filter_month]);
+            }
+
+            if (! empty($filter_date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $filter_date)) {
+                $query->whereDate('rate_date', $filter_date);
+            }
+
+            $history_rates = $query->paginate(20)->appends($request->query());
+        }
+
+        return view('home.bcv_rate', compact('bcv_rate_info', 'history_rates', 'has_bcv_table', 'filter_month', 'filter_date'));
+    }
+
+    public function storeBcvRate(Request $request)
+    {
+        try {
+            if (! DB::getSchemaBuilder()->hasTable('ghm_bcv_rates')) {
+                return redirect()->route('home.bcv_rate')->with('status', [
+                    'success' => 0,
+                    'msg' => 'No existe la tabla ghm_bcv_rates.',
+                ]);
+            }
+
+            $validated = $request->validate([
+                'rate_date' => 'required|date',
+                'usd_rate' => 'required|numeric|min:0.000001',
+            ]);
+
+            $rateDate = $validated['rate_date'];
+            $rateValue = (float) $validated['usd_rate'];
+
+            DB::table('ghm_bcv_rates')->updateOrInsert(
+                ['rate_date' => $rateDate],
+                [
+                    'usd_to_bs' => $rateValue,
+                    'usd_to_ves_rate' => $rateValue,
+                    'source' => 'manual:web',
+                    'source_url' => null,
+                    'is_official' => 1,
+                    'is_fallback' => 0,
+                    'raw_payload' => null,
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+
+            return redirect()->route('home.bcv_rate')->with('status', [
+                'success' => 1,
+                'msg' => 'Tasa del dia guardada correctamente.',
+            ]);
+        } catch (\Exception $e) {
+            return redirect()->route('home.bcv_rate')->with('status', [
+                'success' => 0,
+                'msg' => 'No se pudo guardar la tasa: '.$e->getMessage(),
+            ]);
+        }
+    }
+
+    public function fetchBcvRate()
+    {
+        try {
+            $exitCode = Artisan::call('pos:updateBcvRate');
+            $output = trim((string) Artisan::output());
+
+            if ($exitCode !== 0) {
+                return redirect()->route('home.bcv_rate')->with('status', [
+                    'success' => 0,
+                    'msg' => 'No se pudo traer la tasa desde BCV. '.$output,
+                ]);
+            }
+
+            return redirect()->route('home.bcv_rate')->with('status', [
+                'success' => 1,
+                'msg' => 'Tasa actualizada desde BCV correctamente.',
+            ]);
+        } catch (\Exception $e) {
+            return redirect()->route('home.bcv_rate')->with('status', [
+                'success' => 0,
+                'msg' => 'Error al traer tasa BCV: '.$e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Endpoint JSON para consultar la tasa BCV activa (usado por AJAX polling en el POS).
+     * GET /bcv-rate/current
+     */
+    public function getCurrentBcvRateJson()
+    {
+        try {
+            $rate = getActiveBcvRate();
+            $rateRow = DB::getSchemaBuilder()->hasTable('ghm_bcv_rates')
+                ? DB::table('ghm_bcv_rates')
+                    ->whereNotNull('usd_to_ves_rate')
+                    ->where('usd_to_ves_rate', '>', 0)
+                    ->orderByDesc('rate_date')
+                    ->orderByDesc('id')
+                    ->first()
+                : null;
+
+            return response()->json([
+                'success' => true,
+                'rate' => $rate,
+                'rate_date' => $rateRow->rate_date ?? null,
+                'source' => $rateRow->source ?? null,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'rate' => 1.0], 200);
+        }
+    }
+
+    public function showNotification($id)
+    {
+        $notification = DatabaseNotification::find($id);
+
+        $data = $notification->data;
+
+        $notification->markAsRead();
+
+        return view('home.notification_modal')->with([
+            'notifications' => [$notification],
+        ]);
+    }
+
+    public function attachMediasToGivenModel(Request $request)
+    {
+        if ($request->ajax()) {
+            try {
+                $business_id = request()->session()->get('user.business_id');
+
+                $model_id = $request->input('model_id');
+                $model = $request->input('model_type');
+                $model_media_type = $request->input('model_media_type');
+
+                DB::beginTransaction();
+
+                //find model to which medias are to be attached
+                $model_to_be_attached = $model::where('business_id', $business_id)
+                                        ->findOrFail($model_id);
+
+                Media::uploadMedia($business_id, $model_to_be_attached, $request, 'file', false, $model_media_type);
+
+                DB::commit();
+
+                $output = [
+                    'success' => true,
+                    'msg' => __('lang_v1.success'),
+                ];
+            } catch (Exception $e) {
+                DB::rollBack();
+
+                \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+                $output = [
+                    'success' => false,
+                    'msg' => __('messages.something_went_wrong'),
+                ];
+            }
+
+            return $output;
+        }
+    }
+
+    public function getUserLocation($latlng)
+    {
+        $latlng_array = explode(',', $latlng);
+
+        $response = $this->moduleUtil->getLocationFromCoordinates($latlng_array[0], $latlng_array[1]);
+
+        return ['address' => $response];
+    }
+}
