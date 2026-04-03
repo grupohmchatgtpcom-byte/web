@@ -4,18 +4,22 @@
     <![endif]-->
     <style>
         body {
-            background: linear-gradient(135deg, #012d6a 0%, #373435 50%, #012d6a 100%);
-            background-attachment: fixed;
+            background: url('{{ asset("uploads/FONDO DE OFICINA.jpg.jpeg") }}') center/cover no-repeat fixed;
             min-height: 100vh;
+            position: relative;
         }
         body::before {
             content: '';
             position: fixed;
             inset: 0;
-            background: url('{{ asset("img/login-bg.jpg") }}') center/cover no-repeat;
-            opacity: 0.10;
+            background: linear-gradient(135deg, rgba(1,45,106,0.55) 0%, rgba(55,52,53,0.45) 50%, rgba(1,45,106,0.55) 100%);
             z-index: 0;
             pointer-events: none;
+        }
+        .container-fluid,
+        .container-fluid > .row {
+            position: relative;
+            z-index: 1;
         }
 
         h1 {
@@ -23,10 +27,10 @@
         }
 
         .ghm-login-card {
-            background: rgba(255,255,255,0.97);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(1,148,243,0.15);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(1,148,243,0.2);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
         }
         .ghm-btn-primary {
             background: linear-gradient(135deg, #0194f3 0%, #012d6a 100%) !important;
@@ -39,10 +43,11 @@
             box-shadow: 0 4px 15px rgba(1,148,243,0.4);
         }
         .ghm-footer-auth {
-            color: rgba(255,255,255,0.5);
+            color: rgba(255,255,255,0.7);
             font-size: 12px;
             text-align: center;
             margin-top: 2rem;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
         }
     </style>
 

@@ -72,8 +72,46 @@
 	  transform: rotate(315deg);
 	}
 </style>
-<!-- GrupoHM Custom Theme -->
-<link rel="stylesheet" href="{{ asset('css/ghm-theme.css?v='.$asset_v) }}">
+<!-- GrupoHM Custom Theme (inline to bypass public/css gitignore) -->
+<style>
+:root {
+    --ghm-primary: #0194f3;
+    --ghm-dark: #373435;
+    --ghm-accent: #012d6a;
+    --ghm-primary-light: #33aaff;
+    --ghm-primary-dark: #0178c8;
+}
+.tw-dw-btn-primary, .btn-primary {
+    background-color: var(--ghm-primary) !important;
+    border-color: var(--ghm-primary) !important;
+}
+.tw-dw-btn-primary:hover, .btn-primary:hover {
+    background-color: var(--ghm-primary-dark) !important;
+    border-color: var(--ghm-primary-dark) !important;
+}
+.pos-express-finalize, #pos-finalize, button[id*="finalize"] {
+    background: linear-gradient(135deg, var(--ghm-primary) 0%, var(--ghm-accent) 100%) !important;
+    border-color: var(--ghm-accent) !important;
+    color: #fff !important;
+    font-weight: 700;
+}
+.pos-express-finalize:hover, #pos-finalize:hover {
+    background: linear-gradient(135deg, var(--ghm-accent) 0%, var(--ghm-primary) 100%) !important;
+    box-shadow: 0 4px 15px rgba(1, 148, 243, 0.35);
+}
+.label-primary, .badge-primary {
+    background-color: var(--ghm-primary) !important;
+}
+.nav-tabs > li.active > a,
+.nav-tabs > li.active > a:focus,
+.nav-tabs > li.active > a:hover {
+    border-bottom-color: var(--ghm-primary) !important;
+    color: var(--ghm-accent) !important;
+}
+.progress-bar-primary, .progress-bar {
+    background-color: var(--ghm-primary) !important;
+}
+</style>
 
 @if(!empty($__system_settings['additional_css']))
     {!! $__system_settings['additional_css'] !!}
