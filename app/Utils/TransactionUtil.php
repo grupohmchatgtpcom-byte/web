@@ -145,6 +145,9 @@ class TransactionUtil extends Util
             'is_kitchen_order' => ! empty($input['is_kitchen_order']) ? 1 : 0,
             'ghm_bcv_rate'     => ! empty($input['ghm_bcv_rate']) ? (float) $input['ghm_bcv_rate'] : null,
             'offline_uuid' => ! empty($input['offline_uuid']) ? $input['offline_uuid'] : null,
+            'sync_status' => ! empty($input['sync_status']) ? $input['sync_status'] : 'synced',
+            'origin_device_id' => ! empty($input['origin_device_id']) ? $input['origin_device_id'] : null,
+            'origin_location_id' => ! empty($input['origin_location_id']) ? $input['origin_location_id'] : null,
 
         ]);
 
@@ -754,6 +757,7 @@ class TransactionUtil extends Util
                         'method' => $payment['method'],
                         'business_id' => $transaction->business_id,
                         'payment_uuid' => !empty($payment['payment_uuid']) ? $payment['payment_uuid'] : (string) Str::uuid(),
+                        'sync_status' => !empty($payment['sync_status']) ? $payment['sync_status'] : 'synced',
                         'is_return' => isset($payment['is_return']) ? $payment['is_return'] : 0,
                         'card_transaction_number' => isset($payment['card_transaction_number']) ? $payment['card_transaction_number'] : null,
                         'card_number' => isset($payment['card_number']) ? $payment['card_number'] : null,

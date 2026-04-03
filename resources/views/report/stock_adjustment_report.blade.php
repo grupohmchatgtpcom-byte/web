@@ -64,6 +64,14 @@
                             </span>
                         </td>
                     </tr>
+                    <tr>
+                        <th>{{ __('report.total_shortage_qty') }}:</th>
+                        <td>
+                            <span class="total_shortage_qty">
+                                <i class="fas fa-sync fa-spin fa-fw"></i>
+                            </span>
+                        </td>
+                    </tr>
                 </table>
             @endcomponent
         </div>
@@ -79,9 +87,39 @@
                             </span>
                         </td>
                     </tr>
-                    <tr><td>&nbsp;</td></tr>
+                    <tr>
+                        <th>{{ __('report.total_overage_qty') }}:</th>
+                        <td>
+                             <span class="total_overage_qty">
+                                <i class="fas fa-sync fa-spin fa-fw"></i>
+                            </span>
+                        </td>
+                    </tr>
                     <tr><td>&nbsp;</td></tr>
                 </table>
+            @endcomponent
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-sm-12">
+            @component('components.widget', ['class' => 'box-primary', 'title' => __('report.location_shortage_overage_breakdown')])
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped" id="stock_adjustment_location_breakdown_table">
+                        <thead>
+                            <tr>
+                                <th>@lang('business.location')</th>
+                                <th>@lang('report.total_shortage_qty')</th>
+                                <th>@lang('report.total_overage_qty')</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stock_adjustment_location_breakdown_tbody" data-no-data-text="{{ __('lang_v1.no_data') }}">
+                            <tr>
+                                <td colspan="3" class="text-center text-muted">@lang('lang_v1.no_data')</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             @endcomponent
         </div>
     </div>

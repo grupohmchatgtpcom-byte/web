@@ -430,6 +430,10 @@ class SellPosController extends Controller
                     $input['is_direct_sale'] = 1;
                 }
 
+                $input['sync_status'] = !empty($input['sync_status']) ? $input['sync_status'] : 'synced';
+                $input['origin_device_id'] = !empty($input['origin_device_id']) ? $input['origin_device_id'] : null;
+                $input['origin_location_id'] = !empty($input['origin_location_id']) ? $input['origin_location_id'] : $input['location_id'];
+
                 //Set commission agent
                 $input['commission_agent'] = !empty($request->input('commission_agent')) ? $request->input('commission_agent') : null;
                 $commsn_agnt_setting = $request->session()->get('business.sales_cmsn_agnt');
@@ -540,6 +544,7 @@ class SellPosController extends Controller
 
                 $change_return['amount'] = $input['change_return'] ?? 0;
                 $change_return['is_return'] = 1;
+                $change_return['sync_status'] = 'synced';
 
                 $input['payment'][] = $change_return;
 

@@ -61,6 +61,24 @@
                   </label>
                 </div>
               </div>
+
+              <div class="col-md-12">
+                <div class="checkbox">
+                  <label>
+                    {!! Form::checkbox('permissions[]', 'app.layout.edit', in_array('app.layout.edit', $role_permissions),
+                    [ 'class' => 'input-icheck']); !!} {{ __( 'lang_v1.app_layout_edit' ) }}
+                  </label>
+                </div>
+              </div>
+
+              <div class="col-md-12">
+                <div class="checkbox">
+                  <label>
+                    {!! Form::checkbox('permissions[]', 'sync.supervisor.view', in_array('sync.supervisor.view', $role_permissions),
+                    [ 'class' => 'input-icheck']); !!} {{ __( 'lang_v1.sync_supervisor_view' ) }}
+                  </label>
+                </div>
+              </div>
           </div>
         </div>
         <hr>

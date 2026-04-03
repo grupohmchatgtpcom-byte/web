@@ -31,6 +31,7 @@ use DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Spatie\Activitylog\Models\Activity;
+use Carbon\Carbon;
 
 class ReportController extends Controller
 {
@@ -1133,12 +1134,29 @@ class ReportController extends Controller
                 $query->where('location_id', $location_id);
             }
 
-            $stock_adjustment_details = $query->select(
+            $stock_adjustment_details = (clone $query)->select(
                 DB::raw('SUM(final_total) as total_amount'),
                 DB::raw('SUM(total_amount_recovered) as total_recovered'),
                 DB::raw("SUM(IF(adjustment_type = 'normal', final_total, 0)) as total_normal"),
                 DB::raw("SUM(IF(adjustment_type = 'abnormal', final_total, 0)) as total_abnormal")
             )->first();
+
+            $location_breakdown = (clone $query)
+                ->join('stock_adjustment_lines as sal', 'transactions.id', '=', 'sal.transaction_id')
+                ->join('business_locations as bl', 'transactions.location_id', '=', 'bl.id')
+                ->select(
+                    'bl.id as location_id',
+                    'bl.name as location_name',
+                    DB::raw('SUM(IF(sal.quantity > 0, sal.quantity, 0)) as shortage_qty'),
+                    DB::raw('SUM(IF(sal.quantity < 0, ABS(sal.quantity), 0)) as overage_qty')
+                )
+                ->groupBy('bl.id', 'bl.name')
+                ->orderBy('bl.name')
+                ->get();
+
+            $stock_adjustment_details->total_shortage_qty = (float) $location_breakdown->sum('shortage_qty');
+            $stock_adjustment_details->total_overage_qty = (float) $location_breakdown->sum('overage_qty');
+            $stock_adjustment_details->location_breakdown = $location_breakdown;
 
             return $stock_adjustment_details;
         }
@@ -1146,6 +1164,146 @@ class ReportController extends Controller
 
         return view('report.stock_adjustment_report')
                     ->with(compact('business_locations'));
+    }
+
+    /**
+     * Sync supervisor report (pending/failed/conflict transactions)
+     *
+     * @return \Illuminate\Http\Response|\Illuminate\Contracts\View\View
+     */
+    public function getSyncSupervisorReport(Request $request)
+    {
+        if (! auth()->user()->can('sync.supervisor.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+
+        if ($request->ajax()) {
+            $query = Transaction::join('business_locations as bl', 'transactions.location_id', '=', 'bl.id')
+                ->leftJoin('users as u', 'transactions.created_by', '=', 'u.id')
+                ->where('transactions.business_id', $business_id)
+                ->whereIn('transactions.type', ['sell', 'sales_order'])
+                ->whereIn('transactions.sync_status', ['pending', 'failed', 'conflict'])
+                ->select(
+                    'transactions.id',
+                    'transactions.transaction_date',
+                    'transactions.invoice_no',
+                    'transactions.type',
+                    'transactions.status',
+                    'transactions.payment_status',
+                    'transactions.sync_status',
+                    'transactions.offline_uuid',
+                    'transactions.origin_device_id',
+                    'transactions.origin_location_id',
+                    'transactions.updated_at',
+                    'bl.name as location_name',
+                    DB::raw("CONCAT(COALESCE(u.surname, ''),' ',COALESCE(u.first_name, ''),' ',COALESCE(u.last_name,'')) as added_by")
+                );
+
+            $permitted_locations = auth()->user()->permitted_locations();
+            if ($permitted_locations != 'all') {
+                $query->whereIn('transactions.location_id', $permitted_locations);
+            }
+
+            $start_date = $request->get('start_date');
+            $end_date = $request->get('end_date');
+            if (! empty($start_date) && ! empty($end_date)) {
+                $query->whereBetween(DB::raw('date(transactions.transaction_date)'), [$start_date, $end_date]);
+            }
+
+            $location_id = $request->get('location_id');
+            if (! empty($location_id)) {
+                $query->where('transactions.location_id', $location_id);
+            }
+
+            $sync_status = $request->get('sync_status');
+            if (! empty($sync_status) && in_array($sync_status, ['pending', 'failed', 'conflict'])) {
+                $query->where('transactions.sync_status', $sync_status);
+            }
+
+            return Datatables::of($query)
+                ->editColumn('transaction_date', '{{@format_datetime($transaction_date)}}')
+                ->editColumn('updated_at', '{{@format_datetime($updated_at)}}')
+                ->editColumn('sync_status', function ($row) {
+                    $map = [
+                        'pending' => 'warning',
+                        'failed' => 'danger',
+                        'conflict' => 'info',
+                    ];
+                    $class = $map[$row->sync_status] ?? 'default';
+
+                    return '<span class="label label-' . $class . '">' . e(strtoupper($row->sync_status)) . '</span>';
+                })
+                ->rawColumns(['sync_status'])
+                ->make(true);
+        }
+
+        $business_locations = BusinessLocation::forDropdown($business_id, true);
+
+        return view('report.sync_supervisor_report')->with(compact('business_locations'));
+    }
+
+    /**
+     * Sync supervisor summary cards
+     *
+     * @return array
+     */
+    public function getSyncSupervisorSummary(Request $request)
+    {
+        if (! auth()->user()->can('sync.supervisor.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+
+        $baseQuery = Transaction::join('business_locations as bl', 'transactions.location_id', '=', 'bl.id')
+            ->where('transactions.business_id', $business_id)
+            ->whereIn('transactions.type', ['sell', 'sales_order'])
+            ->whereIn('transactions.sync_status', ['pending', 'failed', 'conflict']);
+
+        $permitted_locations = auth()->user()->permitted_locations();
+        if ($permitted_locations != 'all') {
+            $baseQuery->whereIn('transactions.location_id', $permitted_locations);
+        }
+
+        $start_date = $request->get('start_date');
+        $end_date = $request->get('end_date');
+        if (! empty($start_date) && ! empty($end_date)) {
+            $baseQuery->whereBetween(DB::raw('date(transactions.transaction_date)'), [$start_date, $end_date]);
+        }
+
+        $location_id = $request->get('location_id');
+        if (! empty($location_id)) {
+            $baseQuery->where('transactions.location_id', $location_id);
+        }
+
+        $totals = (clone $baseQuery)->select(
+            DB::raw("SUM(IF(transactions.sync_status = 'pending', 1, 0)) as pending_count"),
+            DB::raw("SUM(IF(transactions.sync_status = 'failed', 1, 0)) as failed_count"),
+            DB::raw("SUM(IF(transactions.sync_status = 'conflict', 1, 0)) as conflict_count"),
+            DB::raw('COUNT(*) as total_count')
+        )->first();
+
+        $byLocation = (clone $baseQuery)->select(
+            'bl.name as location_name',
+            DB::raw("SUM(IF(transactions.sync_status = 'pending', 1, 0)) as pending_count"),
+            DB::raw("SUM(IF(transactions.sync_status = 'failed', 1, 0)) as failed_count"),
+            DB::raw("SUM(IF(transactions.sync_status = 'conflict', 1, 0)) as conflict_count"),
+            DB::raw('COUNT(*) as total_count')
+        )
+            ->groupBy('bl.name')
+            ->orderBy('bl.name')
+            ->get();
+
+        return [
+            'pending_count' => (int) ($totals->pending_count ?? 0),
+            'failed_count' => (int) ($totals->failed_count ?? 0),
+            'conflict_count' => (int) ($totals->conflict_count ?? 0),
+            'total_count' => (int) ($totals->total_count ?? 0),
+            'by_location' => $byLocation,
+            'generated_at' => Carbon::now()->toDateTimeString(),
+        ];
     }
 
     /**

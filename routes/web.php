@@ -280,6 +280,8 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/reports/reporte-cierre/update-comment', [ReportController::class, 'updateClosureComment'])->name('reports.closure_report.update_comment');
     Route::get('/reports/auditoria-operativa', [\App\Http\Controllers\OperationLogController::class, 'index'])->name('reports.auditoria_operativa');
     Route::get('/reports/auditoria-operativa/export', [\App\Http\Controllers\OperationLogController::class, 'exportCsv'])->name('reports.auditoria_operativa.export');
+    Route::get('/reports/sync-supervisor', [ReportController::class, 'getSyncSupervisorReport'])->name('reports.sync_supervisor');
+    Route::get('/reports/sync-supervisor/summary', [ReportController::class, 'getSyncSupervisorSummary'])->name('reports.sync_supervisor.summary');
     Route::get('/reports/accounts-receivable', [AccountsReceivableController::class, 'index'])->name('reports.cxc');
     Route::get('/reports/accounts-receivable/export', [AccountsReceivableController::class, 'export'])->name('reports.cxc.export');
     Route::get('/reports/accounts-receivable/{contact_id}', [AccountsReceivableController::class, 'detalle'])->name('reports.cxc.detalle');

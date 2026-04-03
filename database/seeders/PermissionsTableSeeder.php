@@ -81,6 +81,8 @@ class PermissionsTableSeeder extends Seeder
 
             ['name' => 'access_all_locations'],
             ['name' => 'dashboard.data'],
+            ['name' => 'app.layout.edit'],
+            ['name' => 'sync.supervisor.view'],
         ];
 
         $insert_data = [];

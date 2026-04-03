@@ -888,6 +888,8 @@ return [
     'add_widget_here' => 'Add a widget here',
     'move_row' => 'Move the row',
     'configure_dashboard' => 'Configure Dashboard :name',
+    'app_layout_edit' => 'Edit app visual layout',
+    'sync_supervisor_view' => 'View sync supervisor panel',
     'change_return_label' => 'Change return label',
     'change_return_help' => 'Change return is the amount to be returned to the customer if excess payment is done.',
     'profile_photo' => 'Profile Photo',

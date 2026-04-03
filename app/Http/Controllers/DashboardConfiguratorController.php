@@ -57,6 +57,10 @@ class DashboardConfiguratorController extends Controller
      */
     public function edit($id)
     {
+        if (! auth()->user()->can('app.layout.edit') && ! auth()->user()->can('configure_dashboard')) {
+            abort(403, 'Unauthorized action.');
+        }
+
         $business_id = request()->session()->get('user.business_id');
 
         //get the configuration.
@@ -82,7 +86,7 @@ class DashboardConfiguratorController extends Controller
      */
     public function update(Request $request, $id)
     {
-        if (! auth()->user()->can('configure_dashboard')) {
+        if (! auth()->user()->can('app.layout.edit') && ! auth()->user()->can('configure_dashboard')) {
             abort(403, 'Unauthorized action.');
         }
 

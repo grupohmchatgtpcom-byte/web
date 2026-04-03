@@ -1566,12 +1566,18 @@ function updateStockAdjustmentReport() {
         .endDate.format('YYYY-MM-DD');
 
     var data = { start_date: start, end_date: end, location_id: location_id };
+    var noDataText = $('#stock_adjustment_location_breakdown_tbody').data('no-data-text') || 'No data';
 
     var loader = __fa_awesome();
     $('.total_amount').html(loader);
     $('.total_recovered').html(loader);
     $('.total_normal').html(loader);
     $('.total_abnormal').html(loader);
+    $('.total_shortage_qty').html(loader);
+    $('.total_overage_qty').html(loader);
+    $('#stock_adjustment_location_breakdown_tbody').html(
+        '<tr><td colspan="3" class="text-center"><i class="fas fa-sync fa-spin fa-fw"></i></td></tr>'
+    );
 
     $.ajax({
         method: 'GET',
@@ -1583,6 +1589,24 @@ function updateStockAdjustmentReport() {
             $('.total_recovered').html(__currency_trans_from_en(data.total_recovered, true));
             $('.total_normal').html(__currency_trans_from_en(data.total_normal, true));
             $('.total_abnormal').html(__currency_trans_from_en(data.total_abnormal, true));
+            $('.total_shortage_qty').html(__number_f(data.total_shortage_qty || 0, false, false, __currency_precision));
+            $('.total_overage_qty').html(__number_f(data.total_overage_qty || 0, false, false, __currency_precision));
+
+            var rows = '';
+            if (data.location_breakdown && data.location_breakdown.length > 0) {
+                data.location_breakdown.forEach(function(item) {
+                    rows +=
+                        '<tr>' +
+                        '<td>' + (item.location_name || '') + '</td>' +
+                        '<td>' + __number_f(item.shortage_qty || 0, false, false, __currency_precision) + '</td>' +
+                        '<td>' + __number_f(item.overage_qty || 0, false, false, __currency_precision) + '</td>' +
+                        '</tr>';
+                });
+            } else {
+                rows = '<tr><td colspan="3" class="text-center text-muted">' + noDataText + '</td></tr>';
+            }
+
+            $('#stock_adjustment_location_breakdown_tbody').html(rows);
         },
     });
 

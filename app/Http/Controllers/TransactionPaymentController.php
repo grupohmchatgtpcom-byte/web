@@ -110,6 +110,7 @@ class TransactionPaymentController extends Controller
                 }
 
                 $inputs['payment_uuid'] = $payment_uuid;
+                $inputs['sync_status'] = !empty($request->input('sync_status')) ? $request->input('sync_status') : 'synced';
 
                 // Dualidad de monedas: normalizar y calcular equivalencias
                 $currencyCode = ! empty($inputs['currency_code']) ? strtoupper(trim($inputs['currency_code'])) : 'USD';

@@ -841,6 +841,8 @@ return [
     'add_widget_here' => 'Agrega un widget aquÃ­',
     'move_row' => 'Mover la fila',
     'configure_dashboard' => 'Configurar panel :name',
+    'app_layout_edit' => 'Editar diseno visual de la app',
+    'sync_supervisor_view' => 'Ver panel de supervision de sincronizacion',
     'change_return_label' => 'Cambiar etiqueta de devoluciÃ³n',
     'change_return_help' => 'Cambiar devoluciÃ³n es la cantidad que se devolverÃ¡ al cliente si se realiza un pago en exceso',
     'profile_photo' => 'Foto de perfil',
