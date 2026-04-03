@@ -13,6 +13,8 @@ use App\Utils\TransactionUtil;
 use Datatables;
 use DB;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class TransactionPaymentController extends Controller
 {
@@ -60,6 +62,8 @@ class TransactionPaymentController extends Controller
      */
     public function store(Request $request)
     {
+        $correlation_id = $request->header('X-Correlation-Id') ?: (string) Str::uuid();
+
         try {
             $business_id = $request->session()->get('user.business_id');
             $transaction_id = $request->input('transaction_id');
@@ -80,6 +84,32 @@ class TransactionPaymentController extends Controller
                 $inputs['amount'] = $this->transactionUtil->num_uf($inputs['amount']);
                 $inputs['created_by'] = auth()->user()->id;
                 $inputs['payment_for'] = $transaction->contact_id;
+                $payment_uuid = $request->input('payment_uuid');
+                $payment_uuid = !empty($payment_uuid) ? trim($payment_uuid) : (string) Str::uuid();
+
+                $existing_payment = TransactionPayment::where('business_id', $business_id)
+                    ->where('payment_uuid', $payment_uuid)
+                    ->first();
+
+                if (!empty($existing_payment)) {
+                    Log::info('Payment idempotent replay detected', [
+                        'correlation_id' => $correlation_id,
+                        'business_id' => $business_id,
+                        'payment_uuid' => $payment_uuid,
+                        'transaction_id' => $existing_payment->transaction_id,
+                        'payment_id' => $existing_payment->id,
+                        'user_id' => auth()->id(),
+                    ]);
+
+                    $output = [
+                        'success' => true,
+                        'msg' => __('purchase.payment_added_success'),
+                    ];
+
+                    return redirect()->back()->with(['status' => $output]);
+                }
+
+                $inputs['payment_uuid'] = $payment_uuid;
 
                 // Dualidad de monedas: normalizar y calcular equivalencias
                 $currencyCode = ! empty($inputs['currency_code']) ? strtoupper(trim($inputs['currency_code'])) : 'USD';
@@ -162,7 +192,17 @@ class TransactionPaymentController extends Controller
             if (get_class($e) == \App\Exceptions\AdvanceBalanceNotAvailable::class) {
                 $msg = $e->getMessage();
             } else {
-                \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+                Log::error('Transaction payment store failed', [
+                    'correlation_id' => $correlation_id,
+                    'business_id' => $request->session()->get('user.business_id'),
+                    'transaction_id' => $request->input('transaction_id'),
+                    'payment_uuid' => $request->input('payment_uuid'),
+                    'user_id' => auth()->id(),
+                    'exception' => get_class($e),
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]);
             }
 
             $output = ['success' => false,

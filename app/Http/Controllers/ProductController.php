@@ -1237,6 +1237,11 @@ class ProductController extends Controller
                 $search_fields[] = 'sub_sku';
             }
 
+            $permitted_locations = auth()->user()->permitted_locations();
+            if (!empty($location_id) && $permitted_locations != 'all' && !in_array((int) $location_id, $permitted_locations)) {
+                return json_encode([]);
+            }
+
             $result = $this->productUtil->filterProduct($business_id, $search_term, $location_id, $not_for_selling, $price_group_id, $product_types, $search_fields, $check_qty);
 
             return json_encode($result);
@@ -1254,15 +1259,27 @@ class ProductController extends Controller
     {
         if (request()->ajax()) {
             $term = request()->input('term', '');
-            //$location_id = request()->input('location_id', '');
+            $location_id = request()->input('location_id', '');
 
             //$check_qty = request()->input('check_qty', false);
 
             $business_id = request()->session()->get('user.business_id');
+            $permitted_locations = auth()->user()->permitted_locations();
+
+            if (!empty($location_id) && $permitted_locations != 'all' && !in_array((int) $location_id, $permitted_locations)) {
+                return json_encode([]);
+            }
 
             $products = Product::join('variations', 'products.id', '=', 'variations.product_id')
+                ->join('product_locations as pl', 'pl.product_id', '=', 'products.id')
                 ->where('products.business_id', $business_id)
                 ->where('products.type', '!=', 'modifier');
+
+            if (!empty($location_id)) {
+                $products->where('pl.location_id', $location_id);
+            } elseif ($permitted_locations != 'all') {
+                $products->whereIn('pl.location_id', $permitted_locations);
+            }
 
             //Include search
             if (! empty($term)) {

@@ -56,6 +56,7 @@ use App\Variation;
 use App\Warranty;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Razorpay\Api\Api;
@@ -321,6 +322,9 @@ class SellPosController extends Controller
             return redirect()->action([\App\Http\Controllers\CashRegisterController::class, 'create']);
         }
 
+        $input = [];
+        $correlation_id = $request->header('X-Correlation-Id') ?: (string) Str::uuid();
+
         try {
             $input = $request->except('_token');
 
@@ -333,6 +337,10 @@ class SellPosController extends Controller
             } elseif ($input['status'] == 'proforma') {
                 $input['status'] = 'draft';
                 $input['sub_status'] = 'proforma';
+            }
+
+            if (!empty($input['location_id'])) {
+                $this->ensureUserCanAccessLocation($input['location_id'], $request->session()->get('user.business_id'));
             }
 
             //Add change return
@@ -361,6 +369,41 @@ class SellPosController extends Controller
 
             if (!empty($input['products'])) {
                 $business_id = $request->session()->get('user.business_id');
+                $offline_uuid = !empty($input['offline_uuid']) ? trim($input['offline_uuid']) : null;
+
+                if (!empty($offline_uuid)) {
+                    $existing_sale = Transaction::where('business_id', $business_id)
+                        ->where('type', !empty($input['type']) ? $input['type'] : 'sell')
+                        ->where('offline_uuid', $offline_uuid)
+                        ->first();
+
+                    if (!empty($existing_sale)) {
+                        Log::info('POS idempotent replay detected', [
+                            'correlation_id' => $correlation_id,
+                            'business_id' => $business_id,
+                            'offline_uuid' => $offline_uuid,
+                            'transaction_id' => $existing_sale->id,
+                            'user_id' => $request->session()->get('user.id'),
+                        ]);
+
+                        $output = [
+                            'success' => 1,
+                            'msg' => trans('sale.pos_sale_added'),
+                            'already_processed' => true,
+                            'transaction_id' => $existing_sale->id,
+                        ];
+
+                        if (!$is_direct_sale) {
+                            return $output;
+                        }
+
+                        return redirect()
+                            ->action([\App\Http\Controllers\SellController::class, 'index'])
+                            ->with('status', $output);
+                    }
+
+                    $input['offline_uuid'] = $offline_uuid;
+                }
 
                 //Check if subscribed or not, then check for users quota
                 if (!$this->moduleUtil->isSubscribed($business_id)) {
@@ -652,7 +695,16 @@ class SellPosController extends Controller
             }
         } catch (\Exception $e) {
             DB::rollBack();
-            \Log::emergency('File:' . $e->getFile() . 'Line:' . $e->getLine() . 'Message:' . $e->getMessage());
+            Log::error('POS sale store failed', [
+                'correlation_id' => $correlation_id,
+                'business_id' => $request->session()->get('user.business_id'),
+                'user_id' => $request->session()->get('user.id'),
+                'offline_uuid' => $input['offline_uuid'] ?? null,
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
             $msg = trans('messages.something_went_wrong');
 
             if (get_class($e) == \App\Exceptions\PurchaseSellMismatch::class) {
@@ -1745,6 +1797,8 @@ class SellPosController extends Controller
         $output = [];
 
         try {
+            $this->ensureUserCanAccessLocation($location_id, request()->session()->get('user.business_id'));
+
             $row_count = request()->get('product_row');
             $row_count = $row_count + 1;
             $quantity = request()->get('quantity', 1);
@@ -1804,6 +1858,9 @@ class SellPosController extends Controller
 
         $row_index = $request->input('row_index');
         $location_id = $request->input('location_id');
+        if (!empty($location_id)) {
+            $this->ensureUserCanAccessLocation($location_id, $business_id);
+        }
         $removable = true;
         $payment_types = $this->productUtil->payment_types($location_id, true);
 
@@ -1941,6 +1998,10 @@ class SellPosController extends Controller
 
             $check_qty = false;
             $business_id = $request->session()->get('user.business_id');
+            if (empty($location_id)) {
+                return '';
+            }
+            $this->ensureUserCanAccessLocation($location_id, $business_id);
             $business = $request->session()->get('business');
             $pos_settings = empty($business->pos_settings) ? $this->businessUtil->defaultPosSettings() : json_decode($business->pos_settings, true);
 
@@ -2691,6 +2752,8 @@ class SellPosController extends Controller
 
     public function getFeaturedProducts($id)
     {
+        $this->ensureUserCanAccessLocation($id, request()->session()->get('user.business_id'));
+
         $location = BusinessLocation::findOrFail($id);
         $featured_products = $location->getFeaturedProducts();
 
@@ -3309,6 +3372,20 @@ class SellPosController extends Controller
 
             return $output;
 
+        }
+    }
+
+    /**
+     * Ensure the authenticated user can access the given location.
+     *
+     * @param  int|string  $location_id
+     * @param  int|null  $business_id
+     * @return void
+     */
+    private function ensureUserCanAccessLocation($location_id, $business_id = null)
+    {
+        if (empty($location_id) || !User::can_access_this_location((int) $location_id, $business_id)) {
+            abort(403, 'Unauthorized action.');
         }
     }
 }
