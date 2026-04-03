@@ -4,11 +4,45 @@
     <![endif]-->
     <style>
         body {
-            background-color: #243949;
+            background: linear-gradient(135deg, #012d6a 0%, #373435 50%, #012d6a 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: url('{{ asset("img/login-bg.jpg") }}') center/cover no-repeat;
+            opacity: 0.10;
+            z-index: 0;
+            pointer-events: none;
         }
 
         h1 {
             color: #fff;
+        }
+
+        .ghm-login-card {
+            background: rgba(255,255,255,0.97);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(1,148,243,0.15);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .ghm-btn-primary {
+            background: linear-gradient(135deg, #0194f3 0%, #012d6a 100%) !important;
+            border: none !important;
+            transition: all 0.3s ease;
+        }
+        .ghm-btn-primary:hover {
+            background: linear-gradient(135deg, #012d6a 0%, #0194f3 100%) !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(1,148,243,0.4);
+        }
+        .ghm-footer-auth {
+            color: rgba(255,255,255,0.5);
+            font-size: 12px;
+            text-align: center;
+            margin-top: 2rem;
         }
     </style>
 

@@ -1,0 +1,99 @@
+/* ============================================
+   GrupoHM Venezuela - Custom Theme
+   Paleta: #0194f3 (primario), #373435 (oscuro), #012d6a (acento)
+   ============================================ */
+
+/* --- Variables CSS globales --- */
+:root {
+    --ghm-primary: #0194f3;
+    --ghm-dark: #373435;
+    --ghm-accent: #012d6a;
+    --ghm-primary-light: #33aaff;
+    --ghm-primary-dark: #0178c8;
+}
+
+/* --- Sidebar branding --- */
+.side-bar .tw-bg-primary-800,
+.side-bar [class*="tw-bg-primary-800"] {
+    background-color: var(--ghm-accent) !important;
+}
+.side-bar .tw-bg-primary-900,
+.side-bar [class*="tw-bg-primary-900"] {
+    background-color: var(--ghm-dark) !important;
+}
+
+/* --- Header (topbar) --- */
+.no-print[class*="tw-from-primary-800"] {
+    background: linear-gradient(to right, var(--ghm-accent), var(--ghm-dark)) !important;
+}
+
+/* --- Botones principales (POS cobrar, acciones) --- */
+.tw-dw-btn-primary,
+.btn-primary {
+    background-color: var(--ghm-primary) !important;
+    border-color: var(--ghm-primary) !important;
+}
+.tw-dw-btn-primary:hover,
+.btn-primary:hover {
+    background-color: var(--ghm-primary-dark) !important;
+    border-color: var(--ghm-primary-dark) !important;
+}
+
+/* --- POS: botón de cobro (Finalize) --- */
+.pos-express-finalize,
+#pos-finalize,
+.pos-total-div .btn,
+button[id*="finalize"] {
+    background: linear-gradient(135deg, var(--ghm-primary) 0%, var(--ghm-accent) 100%) !important;
+    border-color: var(--ghm-accent) !important;
+    color: #fff !important;
+    font-weight: 700;
+    transition: all 0.3s ease;
+}
+.pos-express-finalize:hover,
+#pos-finalize:hover {
+    background: linear-gradient(135deg, var(--ghm-accent) 0%, var(--ghm-primary) 100%) !important;
+    box-shadow: 0 4px 15px rgba(1, 148, 243, 0.35);
+}
+
+/* --- Links y acentos --- */
+a.tw-text-primary-600,
+a[class*="tw-text-primary"] {
+    color: var(--ghm-primary) !important;
+}
+a.tw-text-primary-600:hover,
+a[class*="tw-text-primary"]:hover {
+    color: var(--ghm-accent) !important;
+}
+
+/* --- Cards POS con sutil acento --- */
+.pos-header .box-header,
+.pos-header {
+    border-bottom-color: var(--ghm-primary) !important;
+}
+
+/* --- Badges / labels de estado --- */
+.label-primary,
+.badge-primary {
+    background-color: var(--ghm-primary) !important;
+}
+
+/* --- Tabs activos --- */
+.nav-tabs > li.active > a,
+.nav-tabs > li.active > a:focus,
+.nav-tabs > li.active > a:hover {
+    border-bottom-color: var(--ghm-primary) !important;
+    color: var(--ghm-accent) !important;
+}
+
+/* --- Progress bars --- */
+.progress-bar-primary,
+.progress-bar {
+    background-color: var(--ghm-primary) !important;
+}
+
+/* --- Footer POS override --- */
+.content-wrapper + footer,
+footer.no-print {
+    color: var(--ghm-dark) !important;
+}

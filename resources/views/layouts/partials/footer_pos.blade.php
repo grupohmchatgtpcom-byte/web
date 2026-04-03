@@ -6,6 +6,6 @@
     </div> -->
     <!-- Default to the left -->
     <small>
-    	<b>{{ config('app.name', 'ultimatePOS') }} - V{{config('author.app_version')}} | Copyright &copy; {{ date('Y') }} All rights reserved.</b>
+    	<b>GrupoHM Venezuela | Copyright &copy; {{ date('Y') }} Todos los derechos reservados.</b>
     </small>
 </footer>

@@ -72,6 +72,9 @@
 	  transform: rotate(315deg);
 	}
 </style>
+<!-- GrupoHM Custom Theme -->
+<link rel="stylesheet" href="{{ asset('css/ghm-theme.css?v='.$asset_v) }}">
+
 @if(!empty($__system_settings['additional_css']))
     {!! $__system_settings['additional_css'] !!}
 @endif

@@ -11,7 +11,7 @@
     <!-- CSRF Token -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>@yield('title') - {{ config('app.name', 'POS') }}</title>
+    <title>@yield('title') - GrupoHM</title>
 
     @include('layouts.partials.css')
 
@@ -34,9 +34,10 @@
             <div class="col-md-12 col-sm-12 col-xs-12 right-col tw-pt-20 tw-pb-10 tw-px-5">
                 <div class="row">
                     <div
-                        class="lg:tw-w-16 md:tw-h-16 tw-w-12 tw-h-12 tw-flex tw-items-center tw-justify-center tw-mx-auto tw-overflow-hidden tw-bg-white tw-rounded-full tw-p-0.5 tw-mb-4">
-                        <img src="{{ asset('img/logo-small.png')}}" alt="lock" class="tw-rounded-full tw-object-fill" />
+                        class="tw-w-24 tw-h-24 md:tw-w-28 md:tw-h-28 tw-flex tw-items-center tw-justify-center tw-mx-auto tw-overflow-hidden tw-bg-white tw-rounded-full tw-p-1 tw-mb-4 tw-shadow-lg">
+                        <img src="{{ asset('img/logo-ghm.png')}}" alt="GrupoHM" class="tw-rounded-full tw-object-contain tw-w-full tw-h-full" />
                     </div>
+                    <h2 class="tw-text-center tw-text-white tw-font-bold tw-text-xl md:tw-text-2xl tw-mb-6" style="text-shadow: 0 2px 4px rgba(0,0,0,0.3);">GrupoHM</h2>
 
                     <div class="tw-absolute tw-top-2 md:tw-top-5 tw-left-4 md:tw-left-8 tw-flex tw-items-center tw-gap-4"
                         style="text-align: left">
@@ -82,6 +83,10 @@
                     </div>
                 </div>
                 @yield('content')
+
+                <div class="ghm-footer-auth tw-mt-8">
+                    <p>GrupoHM Venezuela | Copyright &copy; {{ date('Y') }} Todos los derechos reservados.</p>
+                </div>
             </div>
         </div>
     </div>
